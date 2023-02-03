@@ -15,6 +15,7 @@
 from libc.string cimport memcpy
 from libc.string cimport memset
 from libc.math cimport fabs
+from libc.math cimport log as ln
 
 import numpy as np
 cimport numpy as cnp
@@ -509,6 +510,89 @@ cdef class Entropy(ClassificationCriterion):
                 if count_k > 0.0:
                     count_k /= self.weighted_n_right
                     entropy_right -= count_k * log(count_k)
+
+        impurity_left[0] = entropy_left / self.n_outputs
+        impurity_right[0] = entropy_right / self.n_outputs
+
+
+cdef class EntropyAdj(ClassificationCriterion):
+    r"""Cross Entropy Adjusted impurity criterion.
+
+    """
+
+    cdef double node_impurity(self) nogil:
+        """Evaluate the impurity of the current node.
+
+        Evaluate the cross-entropy criterion as impurity of the current node,
+        i.e. the impurity of sample_indices[start:end]. The smaller the impurity the
+        better.
+        """
+        cdef double entropy = 0.0
+        cdef double max_entropy_prob
+        cdef double freq_k
+        cdef double adj
+        cdef double freq_adj_k
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(self.n_outputs):
+            max_entropy_prob = 1.0 / self.n_classes[k]
+            for c in range(self.n_classes[k]):
+                freq_k = self.sum_total[k, c] / self.weighted_n_node_samples
+                adj = ( (ln(2) - ln(0.05)) / (2 * self.weighted_n_node_samples) )**(0.5)
+                if freq_k >= max_entropy_prob:
+                    freq_adj_k = max(freq_k - adj, max_entropy_prob)
+                else:
+                    freq_adj_k = min(freq_k + adj, max_entropy_prob)
+
+                if freq_adj_k > 0.0:
+                    entropy -= freq_adj_k * log(freq_adj_k)
+
+        return entropy / self.n_outputs
+
+    cdef void children_impurity(self, double* impurity_left,
+                                double* impurity_right) nogil:
+        """Evaluate the impurity in children nodes.
+
+        i.e. the impurity of the left child (sample_indices[start:pos]) and the
+        impurity the right child (sample_indices[pos:end]).
+
+        Parameters
+        ----------
+        impurity_left : double pointer
+            The memory address to save the impurity of the left node
+        impurity_right : double pointer
+            The memory address to save the impurity of the right node
+        """
+        cdef double entropy_left = 0.0
+        cdef double entropy_right = 0.0
+        cdef double max_entropy_prob
+        cdef double freq_k
+        cdef double adj
+        cdef double freq_adj_k
+        cdef SIZE_t k
+        cdef SIZE_t c
+
+        for k in range(self.n_outputs):
+            max_entropy_prob = 1.0 / self.n_classes[k]
+            for c in range(self.n_classes[k]):
+                freq_k = self.sum_left[k, c] / self.weighted_n_left
+                adj = ( (ln(2) - ln(0.05)) / (2 * self.weighted_n_left) )**(0.5)
+                if freq_k >= max_entropy_prob:
+                    freq_adj_k = max(freq_k - adj, max_entropy_prob)
+                else:
+                    freq_adj_k = min(freq_k + adj, max_entropy_prob)
+                if freq_adj_k > 0.0:
+                    entropy_left -= freq_adj_k * log(freq_adj_k)
+
+                freq_k = self.sum_right[k, c] / self.weighted_n_right
+                adj = ( (ln(2) - ln(0.05)) / (2 * self.weighted_n_right) )**(0.5)
+                if freq_k >= max_entropy_prob:
+                    freq_adj_k = max(freq_k - adj, max_entropy_prob)
+                else:
+                    freq_adj_k = min(freq_k + adj, max_entropy_prob)
+                if freq_adj_k > 0.0:
+                    entropy_right -= freq_adj_k * log(freq_adj_k)
 
         impurity_left[0] = entropy_left / self.n_outputs
         impurity_right[0] = entropy_right / self.n_outputs
